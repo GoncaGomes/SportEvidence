@@ -13,6 +13,7 @@ dependencies = [
     "psycopg[binary]>=3.3.6",
     "pydantic>=2.14.1",
     "pydantic-settings>=2.16.0",
+    "pymupdf4llm>=1.28.2",
     "sqlalchemy>=2.1.5",
 ]
 
@@ -27,4 +28,5 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.17.1",
+    "vulture>=2.16",
 ]
