@@ -1,18 +1,35 @@
 from pathlib import Path
-from markitdown import MarkItDown
+
+import pymupdf4llm
 
 
-CONVERTED_PATH = Path("corpus/converted/test.md")
-INPUT_PATH = Path("corpus/fixtures/40279_2023_Article_1978.pdf")
-md = MarkItDown()
+def _validate_corpus_file(path: Path) -> Path:
+
+    if path.is_dir():
+        raise IsADirectoryError(f"Path is a directory: {path}")
+
+    if not path.is_file():
+        raise FileNotFoundError(f"Path is not a file: {path}")
+
+    if path.suffix.lower() != ".pdf":
+        raise ValueError(f"File is not a PDF: {path}")
+
+    return path
 
 
 def parse_markdown(path: Path) -> str:
-    return md.convert(str(path))
+    """Convert a PDF file into a Markdown string using pymupdf4llm.
 
+    Args:
+        path: The path to the PDF file.
 
-if __name__ == "__main__":
-    result = parse_markdown(INPUT_PATH)
-    CONVERTED_PATH.write_text(result.markdown, encoding="utf-8")
+    Returns:
+        A Markdown string representation of the PDF file.
+    """
+    path = _validate_corpus_file(path)
+    file_md = pymupdf4llm.to_markdown(path)
 
-    
+    if file_md.strip() == "":
+        raise ValueError(f"Empty parse result from PDF file: {path}")
+
+    return file_md
