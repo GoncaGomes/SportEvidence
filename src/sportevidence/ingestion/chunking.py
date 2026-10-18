@@ -11,7 +11,6 @@ INPUT_FILE_TEST = Path("tests/fixtures/SPORT-001.pdf")
 
 def chunk_text(
     text: str,
-    source_path: Path,
     document_id: str,
     chunk_size: int = 2500,
     overlap: int = 250,
@@ -32,9 +31,7 @@ def chunk_text(
     temp = []
     for i in range(len(chunks)):
         chunk = Chunk(
-            document_id=document_id,
             chunk_id=document_id[0:5] + f"#{i + 1:04d}",
-            source_path=source_path,
             text=chunks[i],
         )
         temp.append(chunk)
@@ -42,12 +39,14 @@ def chunk_text(
 
 
 def chunk_document(pdf_path: Path) -> Document:
+    document_id = calculate_sha256(pdf_path)
     chunk_list = chunk_text(
         text=parse_markdown(pdf_path),
-        source_path=pdf_path,
-        document_id=calculate_sha256(pdf_path),
+        document_id=document_id,
     )
-    doc = Document(chunks=tuple(chunk_list))
+    doc = Document(
+        document_id=document_id, source_path=pdf_path, chunks=tuple(chunk_list)
+    )
     return doc
 
 
@@ -60,8 +59,14 @@ def calculate_sha256(pdf_path: Path) -> str:
 
 
 if __name__ == "__main__":
-    # chunk_ids = generate_chunk_id(INPUT_FILE_TEST)
-    # print(chunk_ids)
-    doc = chunk_document(INPUT_FILE_TEST)
-    # print(f"{chunks[0]} \n\n len: {len(chunks[0])}")
-    print(doc.chunks[0])
+    document = chunk_document(INPUT_FILE_TEST)
+
+    print(f"Document ID: {document.document_id}")
+    print(f"Source: {document.source_path}")
+    print(f"Number of chunks: {len(document.chunks)}")
+
+    first_chunk = document.chunks[0]
+
+    print(f"First chunk ID: {first_chunk.chunk_id}")
+    print(f"Text sample: {first_chunk.text[:100]}")
+    print(f"Embedding: {first_chunk.embedding}")

@@ -22,6 +22,7 @@ uv run ruff format .     # Format Python files
 uv build                 # Build source and wheel distributions
 ```
 
+NEVER read the cwd .env file.
 For corpus work, use `uv run python scripts/download_corpus.py`; add `--verify-only` for offline verification. These commands require the locally supplied `tests/corpus_desporto_50.json`; verification also requires existing downloads and their report under `tests/fixtures/`. Both locations are excluded from Git.
 
 ## Coding Style & Naming Conventions
