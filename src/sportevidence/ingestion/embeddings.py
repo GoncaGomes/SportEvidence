@@ -6,7 +6,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
 
-from sportevidence.ingestion.chunking import chunk_document
 from sportevidence.models import Document
 
 load_dotenv()
@@ -19,7 +18,7 @@ CLIENT = OpenAI(
     max_retries=0,
 )
 
-pdf_path = Path("tests/fixtures/SPORT-001.pdf")
+PDF_PATH = Path("tests/fixtures/SPORT-001.pdf")
 
 
 def embed_texts(
@@ -68,17 +67,3 @@ def embed_chunks(doc: Document) -> Document:
         new_chunks.append(new_chunk)
 
     return replace(doc, chunks=tuple(new_chunks))
-
-
-def main():
-    document = chunk_document(pdf_path)
-    embedded_document = embed_chunks(document)
-    print(len(document.chunks))
-    print(len(embedded_document.chunks))
-
-    print(document.chunks[0].embedding)  # None
-    print(embedded_document.chunks[0].embedding is None)  # False
-
-
-if __name__ == "__main__":
-    main()
