@@ -1,9 +1,8 @@
 import importlib.util
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
-import dotenv
 import openai
 import pytest
 
@@ -13,9 +12,10 @@ from sportevidence.models import Chunk, Document
 
 @pytest.fixture
 def embeddings(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    # Block dotenv reads and client initialization before executing module code.
-    monkeypatch.setattr(dotenv, "load_dotenv", Mock())
-    monkeypatch.setattr(openai, "OpenAI", Mock(return_value=Mock()))
+    client = MagicMock()
+    client.__enter__.return_value = client
+    factory = Mock(return_value=client)
+    monkeypatch.setattr(openai, "OpenAI", factory)
     monkeypatch.setenv("SKYNET_BASE_URL", "https://example.invalid/v1")
     monkeypatch.setenv("SKYNET_API_KEY", "test-key")
     monkeypatch.setenv("EMBEDDING_TIMEOUT_S", "30")
@@ -27,6 +27,9 @@ def embeddings(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    factory.assert_not_called()
+    # Keep a reference to the fake client for response setup and assertions.
+    module.CLIENT = client
     return module
 
 
@@ -39,6 +42,28 @@ def set_response(embeddings: ModuleType, items: list[tuple[int, list[float]]]) -
 def test_embed_texts_empty_input_skips_request(embeddings: ModuleType) -> None:
     assert embeddings.embed_texts([]) == []
     embeddings.CLIENT.embeddings.create.assert_not_called()
+
+
+def test_embed_texts_accepts_a_caller_owned_client(embeddings: ModuleType) -> None:
+    client = Mock()
+    client.embeddings.create.return_value = SimpleNamespace(
+        data=[SimpleNamespace(index=0, embedding=[0.1, 0.2])]
+    )
+
+    assert embeddings.embed_texts(["First"], client=client) == [[0.1, 0.2]]
+    client.close.assert_not_called()
+    embeddings.OpenAI.assert_not_called()
+
+
+def test_embed_texts_rejects_missing_model_before_creating_client(
+    embeddings: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("EMBEDDING_MODEL")
+
+    with pytest.raises(ValueError, match="EMBEDDING_MODEL"):
+        embeddings.embed_texts(["First"])
+
+    embeddings.OpenAI.assert_not_called()
 
 
 @pytest.mark.parametrize("texts", [[""], [" \n\t"], ["Valid text", " "]])
