@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from sportevidence!")
+"""Tools for ingesting and retrieving sports-science evidence."""

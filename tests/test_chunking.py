@@ -15,7 +15,7 @@ def test_chunk_text_returns_no_chunks_for_blank_text(text: str) -> None:
 def test_chunk_text_preserves_short_text() -> None:
     result = chunking.chunk_text("Short text.", "abc123")
 
-    assert result == [Chunk("abc12#0001", "Short text.")]
+    assert result == [Chunk("abc123#0001", "Short text.")]
     assert result[0].embedding is None
 
 
@@ -34,7 +34,7 @@ def test_chunk_text_splits_with_expected_overlap(
     assert all(len(chunk.text) <= 5 for chunk in result)
     assert all(chunk.embedding is None for chunk in result)
     assert [chunk.chunk_id for chunk in result] == [
-        f"abc12#{index:04d}" for index in range(1, len(expected_texts) + 1)
+        f"abc123#{index:04d}" for index in range(1, len(expected_texts) + 1)
     ]
     assert result == chunking.chunk_text(
         "abcdefghijkl", "abc123", chunk_size=5, overlap=overlap
@@ -92,9 +92,9 @@ def test_chunk_document_assembles_ordered_chunks(
     assert result.source_path == source_path
     assert isinstance(result.chunks, tuple)
     assert result.chunks == (
-        Chunk(f"{document_id[:5]}#0001", "a" * 2500),
+        Chunk(f"{document_id}#0001", "a" * 2500),
         Chunk(
-            f"{document_id[:5]}#0002",
+            f"{document_id}#0002",
             "a" * 250 + "b" * 500,
         ),
     )
@@ -116,3 +116,10 @@ def test_chunk_document_propagates_parser_errors(
         chunking.chunk_document(source_path)
 
     assert raised.value is error
+
+
+def test_chunk_ids_distinguish_documents_with_the_same_hash_prefix() -> None:
+    first = chunking.chunk_text("Same text", "abc12" + "0" * 59)
+    second = chunking.chunk_text("Same text", "abc12" + "1" * 59)
+
+    assert first[0].chunk_id != second[0].chunk_id

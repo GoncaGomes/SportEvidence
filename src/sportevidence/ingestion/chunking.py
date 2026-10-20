@@ -6,8 +6,6 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from sportevidence.ingestion.parsing import parse_markdown
 from sportevidence.models import Chunk, Document
 
-INPUT_FILE_TEST = Path("tests/fixtures/SPORT-001.pdf")
-
 
 def chunk_text(
     text: str,
@@ -15,7 +13,8 @@ def chunk_text(
     chunk_size: int = 2500,
     overlap: int = 250,
 ) -> list[Chunk]:
-
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
     if overlap > chunk_size or overlap < 0:
         raise ValueError("overlap must satisfy 0 <= overlap <= chunk_size")
 
@@ -28,14 +27,13 @@ def chunk_text(
         length_function=len,
     )
     chunks = splitter.split_text(text)
-    temp = []
-    for i in range(len(chunks)):
-        chunk = Chunk(
-            chunk_id=document_id[0:5] + f"#{i + 1:04d}",
-            text=chunks[i],
+    return [
+        Chunk(
+            chunk_id=f"{document_id}#{index:04d}",
+            text=chunk_text,
         )
-        temp.append(chunk)
-    return temp
+        for index, chunk_text in enumerate(chunks, start=1)
+    ]
 
 
 def chunk_document(pdf_path: Path) -> Document:
@@ -44,10 +42,9 @@ def chunk_document(pdf_path: Path) -> Document:
         text=parse_markdown(pdf_path),
         document_id=document_id,
     )
-    doc = Document(
+    return Document(
         document_id=document_id, source_path=pdf_path, chunks=tuple(chunk_list)
     )
-    return doc
 
 
 def calculate_sha256(pdf_path: Path) -> str:
@@ -55,18 +52,4 @@ def calculate_sha256(pdf_path: Path) -> str:
     with Path(pdf_path).open("rb") as file:
         for chunk in iter(lambda: file.read(1024 * 1024), b""):
             digest.update(chunk)
-        return digest.hexdigest()
-
-
-if __name__ == "__main__":
-    document = chunk_document(INPUT_FILE_TEST)
-
-    print(f"Document ID: {document.document_id}")
-    print(f"Source: {document.source_path}")
-    print(f"Number of chunks: {len(document.chunks)}")
-
-    first_chunk = document.chunks[0]
-
-    print(f"First chunk ID: {first_chunk.chunk_id}")
-    print(f"Text sample: {first_chunk.text[:100]}")
-    print(f"Embedding: {first_chunk.embedding}")
+    return digest.hexdigest()

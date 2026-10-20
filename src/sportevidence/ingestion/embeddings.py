@@ -1,38 +1,39 @@
-import os
+from __future__ import annotations
+
 from dataclasses import replace
 from math import isfinite
-from pathlib import Path
 
-from dotenv import load_dotenv
 from openai import OpenAI
 
+from sportevidence.config import EmbeddingSettings
 from sportevidence.models import Document
-
-load_dotenv()
-
-
-CLIENT = OpenAI(
-    base_url=os.getenv("SKYNET_BASE_URL"),
-    api_key=os.getenv("SKYNET_API_KEY"),
-    timeout=float(os.getenv("EMBEDDING_TIMEOUT_S", "30")),
-    max_retries=0,
-)
-
-PDF_PATH = Path("tests/fixtures/SPORT-001.pdf")
 
 
 def embed_texts(
     texts: list[str],
+    *,
+    client: OpenAI | None = None,
+    settings: EmbeddingSettings | None = None,
 ) -> list[list[float]]:
-
+    """Embed texts, creating a client only when a request is needed."""
     if not texts:
         return []
 
     if any(not text.strip() for text in texts):
         raise ValueError("Texts must not be empty or whitespace-only.")
 
-    response = CLIENT.embeddings.create(
-        model=os.getenv("EMBEDDING_MODEL"), input=texts, encoding_format="float"
+    settings = settings if settings is not None else EmbeddingSettings.from_env()
+    if client is None:
+        with OpenAI(
+            base_url=settings.base_url,
+            api_key=settings.api_key,
+            timeout=settings.timeout_s,
+            max_retries=0,
+        ) as owned_client:
+            return embed_texts(texts, client=owned_client, settings=settings)
+
+    response = client.embeddings.create(
+        model=settings.model, input=texts, encoding_format="float"
     )
     results = sorted(response.data, key=lambda item: item.index)
 
@@ -56,14 +57,18 @@ def embed_texts(
     return [item.embedding for item in results]
 
 
-def embed_chunks(doc: Document) -> Document:
+def embed_chunks(
+    doc: Document,
+    *,
+    client: OpenAI | None = None,
+    settings: EmbeddingSettings | None = None,
+) -> Document:
     texts = [chunk.text for chunk in doc.chunks]
-    vectors = embed_texts(texts)
-
-    new_chunks = []
-
-    for chunk, vector in zip(doc.chunks, vectors):
-        new_chunk = replace(chunk, embedding=vector)
-        new_chunks.append(new_chunk)
-
-    return replace(doc, chunks=tuple(new_chunks))
+    vectors = embed_texts(texts, client=client, settings=settings)
+    return replace(
+        doc,
+        chunks=tuple(
+            replace(chunk, embedding=vector)
+            for chunk, vector in zip(doc.chunks, vectors, strict=True)
+        ),
+    )
