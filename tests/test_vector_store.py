@@ -1,5 +1,5 @@
 from pathlib import Path
-from unittest.mock import Mock
+from unittest.mock import MagicMock, Mock
 
 import pytest
 
@@ -25,7 +25,10 @@ def test_query_collection_preserves_all_queries_and_chunk_metadata(
         ],
         "distances": [[0.0, 0.2], [0.1]],
     }
-    client = Mock()
+    # `with chromadb.PersistentClient(...)` binds to `__enter__`; point it at
+    # the configured client mock.
+    client = MagicMock()
+    client.__enter__.return_value = client
     client.get_collection.return_value = collection
     monkeypatch.setattr(
         vector_store.chromadb, "PersistentClient", Mock(return_value=client)
@@ -51,7 +54,8 @@ def test_query_collection_keeps_empty_groups(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setattr(vector_store, "embed_texts", Mock(return_value=[[1.0]]))
-    client = Mock()
+    client = MagicMock()
+    client.__enter__.return_value = client
     client.get_collection.return_value.query.return_value = {
         "ids": [[]],
         "documents": [[]],
