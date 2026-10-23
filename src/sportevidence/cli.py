@@ -80,11 +80,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not chunks:
             print("  No results.")
         for chunk in chunks:
-            print(f"  Chunk: {chunk.chunk_id}")
-            print(f"  Document: {chunk.document_id}")
+            print(f"  Chunk_id: {chunk.chunk_id}")
+            print(f"  Document_id: {chunk.document_id}")
             print(f"  Source: {chunk.source_path}")
             print(f"  Distance: {chunk.distance:.6f}")
             print(f"  Text: {chunk.text}\n")
+            print(f"  Embeddings: {chunk.embedding[:3]}")
     return 0
 
 

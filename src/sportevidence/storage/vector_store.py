@@ -60,38 +60,38 @@ def query_collection(
 
     query_embeddings = embed_texts(query)
 
-    client = chromadb.PersistentClient(path=str(db_path.resolve()))
-    collection = client.get_collection(
-        name=collection_name,
-        embedding_function=None,
-    )
+    with chromadb.PersistentClient(path=str(db_path.resolve())) as client:
+        collection = client.get_collection(
+            name=collection_name,
+            embedding_function=None,
+        )
 
-    result = collection.query(
-        query_embeddings=query_embeddings,
-        n_results=n_results,
-        include=["documents", "embeddings", "metadatas", "distances"],
-    )
+        result = collection.query(
+            query_embeddings=query_embeddings,
+            n_results=n_results,
+            include=["documents", "embeddings", "metadatas", "distances"],
+        )
 
-    retrieved_chunks = []
+        retrieved_chunks = []
 
-    for query_index, chunk_ids in enumerate(result["ids"]):
-        query_chunks = []
+        for query_index, chunk_ids in enumerate(result["ids"]):
+            query_chunks = []
 
-        for chunk_index, chunk_id in enumerate(chunk_ids):
-            metadata = result["metadatas"][query_index][chunk_index]
-            vector = result["embeddings"][query_index][chunk_index]
+            for chunk_index, chunk_id in enumerate(chunk_ids):
+                metadata = result["metadatas"][query_index][chunk_index]
+                vector = result["embeddings"][query_index][chunk_index]
 
-            query_chunks.append(
-                RetrievedChunk(
-                    chunk_id=chunk_id,
-                    text=result["documents"][query_index][chunk_index],
-                    embedding=[float(value) for value in vector],
-                    document_id=metadata["document_id"],
-                    source_path=metadata["source_path"],
-                    distance=float(result["distances"][query_index][chunk_index]),
+                query_chunks.append(
+                    RetrievedChunk(
+                        chunk_id=chunk_id,
+                        text=result["documents"][query_index][chunk_index],
+                        embedding=[float(value) for value in vector],
+                        document_id=metadata["document_id"],
+                        source_path=metadata["source_path"],
+                        distance=float(result["distances"][query_index][chunk_index]),
+                    )
                 )
-            )
-        retrieved_chunks.append(query_chunks)
+            retrieved_chunks.append(query_chunks)
 
     return RetrievedQueries(
         queries=list(query),
