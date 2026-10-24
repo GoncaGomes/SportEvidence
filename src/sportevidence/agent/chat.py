@@ -3,7 +3,6 @@
 from uuid import uuid4
 
 from dotenv import load_dotenv
-
 from langgraph.checkpoint.memory import InMemorySaver
 
 from sportevidence.agent.runtime import create_evidence_agent
@@ -21,7 +20,7 @@ def main() -> int:
 
     while True:
         try:
-            user_text = input(f"You> ").strip()
+            user_text = input("You> ").strip()
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
@@ -48,16 +47,10 @@ def main() -> int:
                         "role": "user",
                         "content": user_text,
                         "thread_id": thread_id,
-                    }, 
-                    
+                    },
                 ]
             },
-            config={
-                "configurable":{
-                    "thread_id": thread_id
-                },
-                "recursion_limit": 10
-            },
+            config={"configurable": {"thread_id": thread_id}, "recursion_limit": 10},
         )
 
         final_message = result["messages"][-1]

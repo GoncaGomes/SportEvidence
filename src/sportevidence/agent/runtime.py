@@ -1,9 +1,9 @@
 """Build the SportEvidence agent."""
 
 from dotenv import load_dotenv
+from langchain.agents import create_agent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
-from langchain.agents import create_agent
 
 from sportevidence.agent.model import create_chat_model
 from sportevidence.agent.prompts import SYSTEM_PROMPT
@@ -11,7 +11,7 @@ from sportevidence.agent.tools import create_query_tool
 
 
 def create_evidence_agent(
-        checkpointer: BaseCheckpointSaver,
+    checkpointer: BaseCheckpointSaver,
 ) -> CompiledStateGraph:
     return create_agent(
         model=create_chat_model(),
@@ -19,6 +19,7 @@ def create_evidence_agent(
         system_prompt=SYSTEM_PROMPT,
         checkpointer=checkpointer,
     )
+
 
 def main() -> int:
     load_dotenv()
