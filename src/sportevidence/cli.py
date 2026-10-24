@@ -64,29 +64,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 0
 
-    if args.n_results <= 0:
-        parser.error("--n-results must be positive")
-    if any(not query.strip() for query in args.query):
-        parser.error("--query must not be empty or whitespace-only")
+    if args.command == "query-db":
+        if args.n_results <= 0:
+            parser.error("--n-results must be positive")
+        if any(not query.strip() for query in args.query):
+            parser.error("--query must not be empty or whitespace-only")
 
-    result = query_collection(
-        query=args.query,
-        db_path=args.database_path,
-        collection_name=args.collection_name,
-        n_results=args.n_results,
-    )
-    for query, chunks in zip(result.queries, result.retrieved_chunks, strict=True):
-        print(f"Query: {query}")
-        if not chunks:
-            print("  No results.")
-        for chunk in chunks:
-            print(f"  Chunk_id: {chunk.chunk_id}")
-            print(f"  Document_id: {chunk.document_id}")
-            print(f"  Source: {chunk.source_path}")
-            print(f"  Distance: {chunk.distance:.6f}")
-            print(f"  Text: {chunk.text}\n")
-            print(f"  Embeddings: {chunk.embedding[:3]}")
-    return 0
+        result = query_collection(
+            query=args.query,
+            db_path=args.database_path,
+            collection_name=args.collection_name,
+            n_results=args.n_results,
+        )
+        for query, chunks in zip(result.queries, result.retrieved_chunks, strict=True):
+            print(f"Query: {query}")
+            if not chunks:
+                print("  No results.")
+            for chunk in chunks:
+                print(f"  Chunk_id: {chunk.chunk_id}")
+                print(f"  Document_id: {chunk.document_id}")
+                print(f"  Source: {chunk.source_path}")
+                print(f"  Distance: {chunk.distance:.6f}")
+                print(f"  Text: {chunk.text}\n")
+                print(f"  Embeddings: {chunk.embedding[:3]}")
+        return 0
 
 
 if __name__ == "__main__":

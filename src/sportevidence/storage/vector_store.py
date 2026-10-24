@@ -49,7 +49,7 @@ def query_collection(
     query: list[str],
     db_path: Path,
     collection_name: str,
-    n_results: int = 5,
+    n_results: int = 3,
 ) -> RetrievedQueries:
     """Return a group of retrieved chunks for each input query, in order."""
     if n_results <= 0:
