@@ -307,8 +307,6 @@ def prepare_pdf(
 
             mappings.extend([table_mapping, remaining_mapping])
 
-        
-
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output.save(
             output_path,
