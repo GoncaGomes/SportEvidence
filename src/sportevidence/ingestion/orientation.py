@@ -229,7 +229,7 @@ def append_remaining_page(
     )
 
 
-def prepare_pdf(
+def fix_pdf_orientation(
     pdf_path: Path,
     output_path: Path,
     min_rotated_chars: int = 100,
@@ -316,24 +316,3 @@ def prepare_pdf(
 
     return mappings
 
-
-def main() -> int:
-    pdf_path = Path("tests/fixtures/corpus/SPORT-004.pdf")
-
-    output_path = Path(
-        f"tests/fixtures/test_docling/prepared/{pdf_path.stem}_prepared.pdf"
-    )
-
-    mappings = prepare_pdf(
-        pdf_path,
-        output_path,
-    )
-
-    print(f"Prepared PDF saved to: {output_path.resolve()}")
-    print(f"Prepared pages: {len(mappings)}")
-
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
