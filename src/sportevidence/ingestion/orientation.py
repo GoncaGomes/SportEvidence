@@ -233,7 +233,7 @@ def fix_pdf_orientation(
     pdf_path: Path,
     output_path: Path,
     min_rotated_chars: int = 100,
-) -> list[PageMapping]:
+) -> Path:
     """Prepare rotated content and save the full PDF."""
     if pdf_path.resolve() == output_path.resolve():
         raise ValueError("Source and output paths must differ")
@@ -314,5 +314,4 @@ def fix_pdf_orientation(
             deflate=True,
         )
 
-    return mappings
-
+    return output_path

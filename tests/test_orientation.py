@@ -27,7 +27,7 @@ def test_prepare_pdf_preserves_text_and_rotation_threshold(
 ) -> None:
     output_path = tmp_path / "prepared" / "output.pdf"
 
-    mappings = orientation.prepare_pdf(
+    result = orientation.fix_pdf_orientation(
         source_pdf, output_path, min_rotated_chars=threshold
     )
 
@@ -36,10 +36,8 @@ def test_prepare_pdf_preserves_text_and_rotation_threshold(
         assert sorted(
             line for page in prepared for line in page.get_text().splitlines()
         ) == sorted(source[0].get_text().splitlines())
-        assert [mapping.prepared_page for mapping in mappings] == list(
-            range(1, expected_pages + 1)
-        )
-        assert all(mapping.source_page == 1 for mapping in mappings)
+        assert result == output_path
+        assert result.is_file()
         if expected_pages == 2:
             table_lines = orientation.extract_text_lines(prepared[0])
             assert {line.text for line in table_lines} == {
@@ -71,7 +69,7 @@ def test_prepare_pdf_does_not_write_output_when_rotated_crop_overlaps_text(
         source.saveIncr()
 
     with pytest.raises(ValueError, match="Rotated crop overlaps other text"):
-        orientation.prepare_pdf(source_pdf, output_path, min_rotated_chars=1)
+        orientation.fix_pdf_orientation(source_pdf, output_path, min_rotated_chars=1)
 
     if existing_output:
         assert output_path.read_bytes() == original_content
