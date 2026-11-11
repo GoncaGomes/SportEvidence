@@ -1,10 +1,31 @@
 from pathlib import Path
 
-import pymupdf4llm
+from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import (
+    HeadingHierarchyOptions,
+    PdfPipelineOptions,
+)
+from docling.document_converter import DocumentConverter, PdfFormatOption
+
+INPUT_DOC_PATH = Path("tests/fixtures/40279_2023_Article_1978.pdf")
+accelerator_options = AcceleratorOptions(num_threads=8, device=AcceleratorDevice.AUTO)
+pipeline_options = PdfPipelineOptions()
+pipeline_options.do_ocr = True
+pipeline_options.do_table_structure = True
+pipeline_options.generate_parsed_pages = True
+pipeline_options.accelerator_options = accelerator_options
+pipeline_options.heading_hierarchy_options = HeadingHierarchyOptions(enabled=True)
+converter = DocumentConverter(
+    format_options={
+        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
+    },
+    show_progress=True,
+)
 
 
 def _validate_corpus_file(path: Path) -> Path:
-
+    path = Path(path)
     if path.is_dir():
         raise IsADirectoryError(f"Path is a directory: {path}")
 
@@ -17,19 +38,9 @@ def _validate_corpus_file(path: Path) -> Path:
     return path
 
 
-def parse_markdown(path: Path) -> str:
-    """Convert a PDF file into a Markdown string using pymupdf4llm.
-
-    Args:
-        path: The path to the PDF file.
-
-    Returns:
-        A Markdown string representation of the PDF file.
-    """
-    path = _validate_corpus_file(path)
-    file_md = pymupdf4llm.to_markdown(path)
-
-    if file_md.strip() == "":
-        raise ValueError(f"Empty parse result from PDF file: {path}")
-
-    return file_md
+def convert_document(path: Path) -> Path:
+    _validate_corpus_file(path)
+    result = converter.convert(Path(path))
+    json_path = Path(f"tests/fixtures/corpus_json/{path.stem}.json")
+    result.document.save_as_json(json_path)
+    return json_path
