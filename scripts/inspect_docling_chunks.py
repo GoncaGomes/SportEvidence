@@ -16,9 +16,7 @@ from docling_core.transforms.serializer.markdown import (
 from docling_core.types.doc import DoclingDocument
 from dotenv import load_dotenv
 
-JSON_PATH = Path(
-    "tests/fixtures/corpus_json/SPORT-002_prepared_associated.json"
-)
+JSON_PATH = Path("tests/fixtures/corpus_json/SPORT-002_prepared.json")
 
 
 class MarkdownTableProvider(ChunkingSerializerProvider):
@@ -81,58 +79,12 @@ def main() -> None:
     embedding_chunck23 = chunker.contextualize(chunk=chunks[23])
     print(embedding_chunck23)
 
-
     for index, chunk in enumerate(chunks[:10], start=1):
         embeddings = chunker.contextualize(chunk=chunk)
         token_number = tokenizer.count_tokens(embeddings)
-        print(f"Chunk {index}:Size in tokens: {token_number}Text{embeddings}\n\n")
-
-    """
-    for index, chunk in enumerate(chunks, start=1):
-        items = chunk.meta.doc_items
-
-        table_references.update(
-            item.self_ref
-            for item in items
-            if item.label == DocItemLabel.TABLE
-        )
-
-        has_text = any(
-            item.label in text_labels
-            for item in items
-        )
-        has_table = any(
-            item.label == DocItemLabel.TABLE
-            for item in items
-        )
-
-        if not (has_text and has_table):
-            continue
-
-        mixed_chunk_count += 1
-
-        references = [item.self_ref for item in items]
-        embedding_text = chunker.contextualize(chunk=chunk)
-        token_count = tokenizer.count_tokens(embedding_text)
-
         print(
-            f"Chunk {index}: "
-            f"tokens={token_count}, "
-            f"references={references}"
+            f"Chunk {index}:\nSize in tokens: {token_number}\n", f"Text{embeddings}\n\n"
         )
-
-        if mixed_chunk_count <= 5:
-            print(embedding_text)
-            print()
-
-    print(f"\nMixed chunks: {mixed_chunk_count}")
-    print(f"Distinct table items represented: {len(table_references)}")
-
-    expected_references = {table.self_ref for table in document.tables}
-    missing_references = expected_references - table_references
-
-    print(f"Table items without chunks: {sorted(missing_references)}")
-    """
 
 
 if __name__ == "__main__":
