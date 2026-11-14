@@ -1,178 +1,190 @@
-import importlib.util
+import hashlib
+import json
 from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
 
-import openai
 import pytest
 
-from sportevidence.ingestion import chunking
+from sportevidence.config import EmbeddingSettings
+from sportevidence.ingestion import embeddings
 from sportevidence.models import Chunk, Document
 
 
 @pytest.fixture
-def embeddings(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
-    client = MagicMock()
-    client.__enter__.return_value = client
-    factory = Mock(return_value=client)
-    monkeypatch.setattr(openai, "OpenAI", factory)
-    monkeypatch.setenv("SKYNET_BASE_URL", "https://example.invalid/v1")
-    monkeypatch.setenv("SKYNET_API_KEY", "test-key")
-    monkeypatch.setenv("EMBEDDING_TIMEOUT_S", "30")
-    monkeypatch.setenv("EMBEDDING_MODEL", "test-embedding-model")
-    spec = importlib.util.spec_from_file_location(
-        "sportevidence.ingestion.embeddings",
-        Path(chunking.__file__).with_name("embeddings.py"),
+def client() -> Mock:
+    return Mock()
+
+
+@pytest.fixture
+def settings() -> EmbeddingSettings:
+    return EmbeddingSettings(
+        model="test-embedding-model",
+        api_key="test-key",
     )
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    factory.assert_not_called()
-    # Keep a reference to the fake client for response setup and assertions.
-    module.CLIENT = client
-    return module
 
 
-def set_response(embeddings: ModuleType, items: list[tuple[int, list[float]]]) -> None:
-    embeddings.CLIENT.embeddings.create.return_value = SimpleNamespace(
+def set_response(client: Mock, items: list[tuple[int, list[float]]]) -> None:
+    client.embeddings.create.return_value = SimpleNamespace(
         data=[SimpleNamespace(index=index, embedding=vector) for index, vector in items]
     )
 
 
-def test_embed_texts_empty_input_skips_request(embeddings: ModuleType) -> None:
-    assert embeddings.embed_texts([]) == []
-    embeddings.CLIENT.embeddings.create.assert_not_called()
-
-
-def test_embed_texts_accepts_a_caller_owned_client(embeddings: ModuleType) -> None:
-    client = Mock()
-    client.embeddings.create.return_value = SimpleNamespace(
-        data=[SimpleNamespace(index=0, embedding=[0.1, 0.2])]
-    )
-
-    assert embeddings.embed_texts(["First"], client=client) == [[0.1, 0.2]]
-    client.close.assert_not_called()
-    embeddings.OpenAI.assert_not_called()
-
-
-def test_embed_texts_rejects_missing_model_before_creating_client(
-    embeddings: ModuleType, monkeypatch: pytest.MonkeyPatch
+def test_empty_entry_needs_no_settings_or_client(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv("EMBEDDING_MODEL")
+    load_settings = Mock(side_effect=AssertionError("Settings must not be loaded"))
+    create_client = Mock(side_effect=AssertionError("Client must not be created"))
+    monkeypatch.setattr(EmbeddingSettings, "from_env", load_settings)
+    monkeypatch.setattr(embeddings, "OpenAI", create_client)
 
-    with pytest.raises(ValueError, match="EMBEDDING_MODEL"):
-        embeddings.embed_texts(["First"])
+    assert embeddings.embed_texts([]) == []
+    load_settings.assert_not_called()
+    create_client.assert_not_called()
 
-    embeddings.OpenAI.assert_not_called()
 
-
-@pytest.mark.parametrize("texts", [[""], [" \n\t"], ["Valid text", " "]])
-def test_embed_texts_rejects_blank_input(
-    embeddings: ModuleType, texts: list[str]
+@pytest.mark.parametrize("blank", ["", " \n\t "])
+def test_blank_text_is_rejected(
+    client: Mock, settings: EmbeddingSettings, blank: str
 ) -> None:
     with pytest.raises(ValueError, match="empty or whitespace-only"):
-        embeddings.embed_texts(texts)
+        embeddings.embed_texts(["Valid text", blank], client=client, settings=settings)
 
-    embeddings.CLIENT.embeddings.create.assert_not_called()
+    client.embeddings.create.assert_not_called()
 
 
-def test_embed_texts_orders_response_and_passes_request_arguments(
-    embeddings: ModuleType,
+def test_embed_texts_orders_results_and_preserves_supplied_client(
+    client: Mock, settings: EmbeddingSettings
 ) -> None:
-    set_response(embeddings, [(1, [0.3, 0.4]), (0, [0.1, -0.2])])
+    set_response(client, [(1, [-0.3, 0.4]), (0, [0.1, 0.2])])
 
-    assert embeddings.embed_texts(["First", "Second"]) == [[0.1, -0.2], [0.3, 0.4]]
-    embeddings.CLIENT.embeddings.create.assert_called_once_with(
-        model="test-embedding-model", input=["First", "Second"], encoding_format="float"
+    result = embeddings.embed_texts(
+        ["First", "Second"], client=client, settings=settings
     )
 
+    assert result == [[0.1, 0.2], [-0.3, 0.4]]
+    client.embeddings.create.assert_called_once_with(
+        model=settings.model, input=["First", "Second"], encoding_format="float"
+    )
+    client.close.assert_not_called()
 
-@pytest.mark.parametrize("indices", [[], [0], [0, 0], [0, 2], [-1, 0], [0, 1, 2]])
-def test_embed_texts_rejects_invalid_response_indices(
-    embeddings: ModuleType, indices: list[int]
+
+def test_embed_texts_loads_settings_and_closes_owned_client(
+    monkeypatch: pytest.MonkeyPatch, client: Mock, settings: EmbeddingSettings
 ) -> None:
-    set_response(embeddings, [(index, [0.1, 0.2]) for index in indices])
+    load_settings = Mock(return_value=settings)
+    create_client = MagicMock()
+    create_client.return_value.__enter__.return_value = client
+    set_response(client, [(0, [0.1, 0.2])])
+    monkeypatch.setattr(EmbeddingSettings, "from_env", load_settings)
+    monkeypatch.setattr(embeddings, "OpenAI", create_client)
 
-    with pytest.raises(RuntimeError, match="embedding indices"):
-        embeddings.embed_texts(["First", "Second"])
+    assert embeddings.embed_texts(["First"]) == [[0.1, 0.2]]
+
+    load_settings.assert_called_once_with()
+    create_client.assert_called_once_with(
+        base_url=settings.base_url,
+        api_key=settings.api_key,
+        timeout=settings.timeout_s,
+        max_retries=0,
+    )
+    create_client.return_value.__exit__.assert_called_once_with(None, None, None)
 
 
 @pytest.mark.parametrize(
-    ("vectors", "message"),
+    ("items", "message"),
     [
-        ([[0.1, 0.2], [0.3]], "dimensions do not match"),
-        ([[float("nan")], [0.1]], "non-finite"),
-        ([[0.1], [float("inf")]], "non-finite"),
-        ([[float("-inf")], [0.1]], "non-finite"),
-        ([[0.1, 0.2], [0.0, 0.0]], "zero vector"),
-        ([[], []], "zero vector"),
+        ([], "indices"),
+        ([(0, [1.0]), (0, [2.0])], "indices"),
+        ([(0, [1.0]), (2, [2.0])], "indices"),
+        ([(0, [1.0]), (1, [1.0, 2.0])], "dimensions"),
+        ([(0, [float("nan")]), (1, [1.0])], "non-finite"),
+        ([(0, [float("inf")]), (1, [1.0])], "non-finite"),
+        ([(0, [float("-inf")]), (1, [1.0])], "non-finite"),
+        ([(0, [0.0, 0.0]), (1, [1.0, 2.0])], "zero vector"),
+        ([(0, []), (1, [])], "zero vector"),
     ],
-    ids=["dimensions", "nan", "infinity", "negative-infinity", "zeros", "empty"],
+    ids=[
+        "missing",
+        "duplicate",
+        "unexpected",
+        "dimensions",
+        "nan",
+        "infinity",
+        "negative-infinity",
+        "zero",
+        "empty-vector",
+    ],
 )
-def test_embed_texts_rejects_invalid_vectors(
-    embeddings: ModuleType, vectors: list[list[float]], message: str
+def test_embed_texts_rejects_invalid_response(
+    client: Mock,
+    settings: EmbeddingSettings,
+    items: list[tuple[int, list[float]]],
+    message: str,
 ) -> None:
-    set_response(embeddings, list(enumerate(vectors)))
+    set_response(client, items)
 
     with pytest.raises(RuntimeError, match=message):
-        embeddings.embed_texts(["First", "Second"])
+        embeddings.embed_texts(["First", "Second"], client=client, settings=settings)
 
 
-def test_embed_texts_propagates_client_errors(embeddings: ModuleType) -> None:
-    error = RuntimeError("Embedding service unavailable")
-    embeddings.CLIENT.embeddings.create.side_effect = error
-
-    with pytest.raises(RuntimeError) as raised:
-        embeddings.embed_texts(["First"])
-
-    assert raised.value is error
-
-
-@pytest.mark.parametrize("existing_embedding", [None, [0.9, 0.8]])
-def test_embed_chunks_preserves_document_and_replaces_embeddings(
-    embeddings: ModuleType, existing_embedding: list[float] | None
+def test_embed_document_builds_document(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    chunks = (
-        Chunk("abc12#0001", "First", existing_embedding),
-        Chunk("abc12#0002", "Second"),
-    )
-    document = Document("abc123", Path("source.pdf"), chunks)
-    set_response(embeddings, [(1, [0.3, 0.4]), (0, [0.1, -0.2])])
+    json_path = tmp_path / "paper.json"
+    content = json.dumps({"name": "paper_prepared"}).encode("utf-8")
+    json_path.write_bytes(content)
+    chunk_document = Mock(return_value=(["First", "Second"], "Paper title"))
+    embed_texts = Mock(return_value=[[0.1, 0.2], [0.3, 0.4]])
+    monkeypatch.setattr(embeddings, "chunk_document", chunk_document)
+    monkeypatch.setattr(embeddings, "embed_texts", embed_texts)
 
-    result = embeddings.embed_chunks(document)
+    result = embeddings.embed_document(json_path)
 
     assert result == Document(
-        document.document_id,
-        document.source_path,
-        (
-            Chunk("abc12#0001", "First", [0.1, -0.2]),
-            Chunk("abc12#0002", "Second", [0.3, 0.4]),
-        ),
+        title="Paper title",
+        document_id="paper",
+        source_path=json_path,
+        source_path_hash=hashlib.sha256(content).hexdigest(),
+        chunks=[
+            Chunk(text="First", embedding=[0.1, 0.2]),
+            Chunk(text="Second", embedding=[0.3, 0.4]),
+        ],
     )
-    assert result is not document
-    assert all(new is not old for new, old in zip(result.chunks, chunks))
-    assert document.chunks is chunks
-    assert chunks[0].embedding == existing_embedding
-    assert chunks[1].embedding is None
-    embeddings.CLIENT.embeddings.create.assert_called_once_with(
-        model="test-embedding-model", input=["First", "Second"], encoding_format="float"
-    )
+    chunk_document.assert_called_once_with(json_path)
+    embed_texts.assert_called_once_with(["First", "Second"])
 
 
-def test_embed_chunks_empty_document_skips_request(embeddings: ModuleType) -> None:
-    document = Document("abc123", Path("source.pdf"), ())
-
-    assert embeddings.embed_chunks(document) == document
-    embeddings.CLIENT.embeddings.create.assert_not_called()
-
-
-def test_embed_chunks_propagates_errors_without_changing_document(
-    embeddings: ModuleType,
+def test_save_embeded_document_json_creates_directory_and_serializes(
+    tmp_path: Path,
 ) -> None:
-    document = Document("abc123", Path("source.pdf"), (Chunk("abc12#0001", "First"),))
-    set_response(embeddings, [(0, [0.0])])
+    doc = Document(
+        title=None,
+        document_id="paper",
+        source_path=tmp_path / "source.json",
+        source_path_hash="source-hash",
+        chunks=[Chunk(text="Evidence", embedding=[0.1, 0.2])],
+    )
+    output_directory = tmp_path / "nested" / "embedded"
 
-    with pytest.raises(RuntimeError, match="zero vector"):
-        embeddings.embed_chunks(document)
+    embeddings.save_embeded_document_json(doc, output_directory)
 
-    assert document.chunks[0].embedding is None
+    assert json.loads(
+        (output_directory / "paper.json").read_text(encoding="utf-8")
+    ) == {
+        "title": None,
+        "document_id": "paper",
+        "source_path": str(doc.source_path),
+        "source_path_hash": "source-hash",
+        "chunks": [{"text": "Evidence", "embedding": [0.1, 0.2]}],
+    }
+
+
+@pytest.mark.parametrize(
+    "content", [b"", b"x" * (1024 * 1024 + 1)], ids=["empty", "multi-block"]
+)
+def test_calculate_sha256(tmp_path: Path, content: bytes) -> None:
+    path = tmp_path / "source.bin"
+    path.write_bytes(content)
+
+    assert embeddings.calculate_sha256(path) == hashlib.sha256(content).hexdigest()
