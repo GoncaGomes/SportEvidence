@@ -145,7 +145,7 @@ def test_embed_document_builds_document(
         title="Paper title",
         document_id="paper",
         source_path=json_path,
-        source_path_hash=hashlib.sha256(content).hexdigest(),
+        source_hash=hashlib.sha256(content).hexdigest(),
         chunks=[
             Chunk(text="First", embedding=[0.1, 0.2]),
             Chunk(text="Second", embedding=[0.3, 0.4]),
@@ -162,7 +162,7 @@ def test_save_embeded_document_json_creates_directory_and_serializes(
         title=None,
         document_id="paper",
         source_path=tmp_path / "source.json",
-        source_path_hash="source-hash",
+        source_hash="source-hash",
         chunks=[Chunk(text="Evidence", embedding=[0.1, 0.2])],
     )
     output_directory = tmp_path / "nested" / "embedded"
@@ -175,7 +175,7 @@ def test_save_embeded_document_json_creates_directory_and_serializes(
         "title": None,
         "document_id": "paper",
         "source_path": str(doc.source_path),
-        "source_path_hash": "source-hash",
+        "source_hash": "source-hash",
         "chunks": [{"text": "Evidence", "embedding": [0.1, 0.2]}],
     }
 
