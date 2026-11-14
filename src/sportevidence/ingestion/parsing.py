@@ -38,9 +38,12 @@ def _validate_corpus_file(path: Path) -> Path:
     return path
 
 
-def convert_document(path: Path) -> Path:
+def convert_document(
+    path: Path, output_directory: Path = Path("tests/fixtures/corpus_json")
+) -> Path:
     _validate_corpus_file(path)
     result = converter.convert(Path(path))
-    json_path = Path(f"tests/fixtures/corpus_json/{path.stem}.json")
+    output_directory.mkdir(parents=True, exist_ok=True)
+    json_path = output_directory / f"{path.stem}.json"
     result.document.save_as_json(json_path)
     return json_path

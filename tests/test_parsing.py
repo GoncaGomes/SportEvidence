@@ -23,7 +23,7 @@ def test_convert_document_saves_json_and_returns_path(
     monkeypatch.setattr(parsing, "converter", fake_converter)
 
     expected_path = Path("tests/fixtures/corpus_json/paper.json")
-
+    monkeypatch.chdir(tmp_path)
     result = parsing.convert_document(pdf_path)
 
     fake_converter.convert.assert_called_once_with(pdf_path)
@@ -57,7 +57,7 @@ def test_invalid_input_never_calls_the_converter(
 
     fake_converter = Mock()
     monkeypatch.setattr(parsing, "converter", fake_converter)
-
+    monkeypatch.chdir(tmp_path)
     with pytest.raises(expected_error):
         parsing.convert_document(input_path)
 
@@ -75,7 +75,7 @@ def test_conversion_errors_propagates_without_saving(
     fake_result.document = fake_document
     fake_converter.convert.return_value = fake_result
     fake_converter.convert.side_effect = ValueError("Conversion failed")
-
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(parsing, "converter", fake_converter)
 
     with pytest.raises(ValueError, match="Conversion failed"):
@@ -100,9 +100,31 @@ def test_save_json_error_propagate(
 
     monkeypatch.setattr(parsing, "converter", fake_converter)
     expected_path = Path("tests/fixtures/corpus_json/paper.json")
-
+    monkeypatch.chdir(tmp_path)
     with pytest.raises(OSError, match="Save failed"):
         parsing.convert_document(pdf_path)
 
     fake_converter.convert.assert_called_once_with(pdf_path)
+    fake_document.save_as_json.assert_called_once_with(expected_path)
+
+
+def test_custom_directory_returns_correct_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output_directory = tmp_path / "exports" / "nested"
+    pdf_path = tmp_path / "paper.PDF"
+    pdf_path.touch()
+    fake_converter = Mock()
+    fake_document = Mock()
+    fake_result = Mock()
+    fake_converter.convert.return_value = fake_result
+    fake_result.document = fake_document
+
+    monkeypatch.setattr(parsing, "converter", fake_converter)
+    expected_path = output_directory / "paper.json"
+
+    result = parsing.convert_document(pdf_path, output_directory)
+    assert output_directory.is_dir()
+    fake_converter.convert.assert_called_once_with(pdf_path)
+    assert result == expected_path
     fake_document.save_as_json.assert_called_once_with(expected_path)
