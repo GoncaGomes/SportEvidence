@@ -68,7 +68,7 @@ def embed_document(json_path: Path) -> Document:
     with open(json_path, "r", encoding="utf-8") as f:
         temp = json.load(f)
     document_id = temp["name"].replace("_prepared", "")
-    source_path_hash = calculate_sha256(json_path)
+    source_file_hash = calculate_sha256(json_path)
     embeded_chunks = embed_texts(chunks)
     chunks = [
         Chunk(text=chunk_text, embedding=embeded_txt)
@@ -78,7 +78,7 @@ def embed_document(json_path: Path) -> Document:
         title=title,
         document_id=document_id,
         source_path=json_path,
-        source_path_hash=source_path_hash,
+        source_hash=source_file_hash,
         chunks=chunks,
     )
     return doc
