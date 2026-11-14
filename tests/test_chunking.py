@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import Mock, call
 
 import pytest
-from docling_core.types.doc import DocItemLabel, DoclingDocument, TableCell, TableData
+from docling_core.types.doc import DocItemLabel, DoclingDocument, TableCell, TableData  # pyright: ignore[reportPrivateImportUsage]
 
 from sportevidence.ingestion import chunking
 
