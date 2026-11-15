@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from math import isfinite
 from pathlib import Path
 
@@ -12,7 +12,7 @@ from sportevidence.config import EmbeddingSettings
 from sportevidence.ingestion.chunking import (
     chunk_document,
 )
-from sportevidence.models import Chunk, Document
+from sportevidence.models import Document
 
 
 def embed_texts(
@@ -64,15 +64,12 @@ def embed_texts(
 
 
 def embed_document(json_path: Path) -> Document:
-    chunks, title = chunk_document(json_path)
-    with open(json_path, "r", encoding="utf-8") as f:
-        temp = json.load(f)
-    document_id = temp["name"].replace("_prepared", "")
+    chunks, title, document_id = chunk_document(json_path)
     source_file_hash = calculate_sha256(json_path)
-    embeded_chunks = embed_texts(chunks)
+    embeded_chunks = embed_texts([chunk.text for chunk in chunks])
     chunks = [
-        Chunk(text=chunk_text, embedding=embeded_txt)
-        for chunk_text, embeded_txt in zip(chunks, embeded_chunks)
+        replace(chunk, embedding=vector)
+        for chunk, vector in zip(chunks, embeded_chunks, strict=True)
     ]
     doc = Document(
         title=title,

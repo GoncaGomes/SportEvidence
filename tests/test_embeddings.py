@@ -1,5 +1,6 @@
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, Mock
@@ -132,12 +133,18 @@ def test_embed_document_builds_document(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     json_path = tmp_path / "paper.json"
-    content = json.dumps({"name": "paper_prepared"}).encode("utf-8")
+    content = json.dumps({"name": "different_prepared"}).encode("utf-8")
     json_path.write_bytes(content)
-    chunk_document = Mock(return_value=(["First", "Second"], "Paper title"))
+    chunks = [
+        Chunk(chunk_id="paper:0", chunk_index=0, text="First", page_numbers=(1, 2)),
+        Chunk(chunk_id="paper:1", chunk_index=1, text="Second", page_numbers=(3,)),
+    ]
+    chunk_document = Mock(return_value=(chunks, "Paper title", "paper"))
     embed_texts = Mock(return_value=[[0.1, 0.2], [0.3, 0.4]])
+    load_json = Mock(side_effect=AssertionError("Metadata must come from chunking"))
     monkeypatch.setattr(embeddings, "chunk_document", chunk_document)
     monkeypatch.setattr(embeddings, "embed_texts", embed_texts)
+    monkeypatch.setattr(embeddings.json, "load", load_json)
 
     result = embeddings.embed_document(json_path)
 
@@ -147,12 +154,39 @@ def test_embed_document_builds_document(
         source_path=json_path,
         source_hash=hashlib.sha256(content).hexdigest(),
         chunks=[
-            Chunk(text="First", embedding=[0.1, 0.2]),
-            Chunk(text="Second", embedding=[0.3, 0.4]),
+            replace(chunks[0], embedding=[0.1, 0.2]),
+            replace(chunks[1], embedding=[0.3, 0.4]),
         ],
     )
     chunk_document.assert_called_once_with(json_path)
     embed_texts.assert_called_once_with(["First", "Second"])
+    load_json.assert_not_called()
+    assert all(chunk.embedding is None for chunk in chunks)
+
+
+def test_embed_document_with_no_chunks_needs_no_settings_or_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    json_path = tmp_path / "empty.json"
+    content = b"{}"
+    json_path.write_bytes(content)
+    chunk_document = Mock(return_value=([], None, "empty"))
+    load_settings = Mock(side_effect=AssertionError("Settings must not be loaded"))
+    create_client = Mock(side_effect=AssertionError("Client must not be created"))
+    monkeypatch.setattr(embeddings, "chunk_document", chunk_document)
+    monkeypatch.setattr(EmbeddingSettings, "from_env", load_settings)
+    monkeypatch.setattr(embeddings, "OpenAI", create_client)
+
+    assert embeddings.embed_document(json_path) == Document(
+        document_id="empty",
+        source_path=json_path,
+        source_hash=hashlib.sha256(content).hexdigest(),
+        chunks=[],
+        title=None,
+    )
+    chunk_document.assert_called_once_with(json_path)
+    load_settings.assert_not_called()
+    create_client.assert_not_called()
 
 
 def test_save_embeded_document_json_creates_directory_and_serializes(
@@ -163,7 +197,15 @@ def test_save_embeded_document_json_creates_directory_and_serializes(
         document_id="paper",
         source_path=tmp_path / "source.json",
         source_hash="source-hash",
-        chunks=[Chunk(text="Evidence", embedding=[0.1, 0.2])],
+        chunks=[
+            Chunk(
+                chunk_id="paper:0",
+                chunk_index=0,
+                text="Evidence",
+                page_numbers=(1, 2),
+                embedding=[0.1, 0.2],
+            )
+        ],
     )
     output_directory = tmp_path / "nested" / "embedded"
 
@@ -176,7 +218,15 @@ def test_save_embeded_document_json_creates_directory_and_serializes(
         "document_id": "paper",
         "source_path": str(doc.source_path),
         "source_hash": "source-hash",
-        "chunks": [{"text": "Evidence", "embedding": [0.1, 0.2]}],
+        "chunks": [
+            {
+                "chunk_id": "paper:0",
+                "chunk_index": 0,
+                "text": "Evidence",
+                "page_numbers": [1, 2],
+                "embedding": [0.1, 0.2],
+            }
+        ],
     }
 
 
