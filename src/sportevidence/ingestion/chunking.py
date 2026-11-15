@@ -1,6 +1,6 @@
-import os
 from pathlib import Path
 
+from docling_core.transforms.chunker.doc_chunk import DocChunk
 from docling_core.transforms.chunker.hierarchical_chunker import (
     ChunkingDocSerializer,
     ChunkingSerializerProvider,
@@ -17,7 +17,7 @@ from docling_core.types.doc.document import DoclingDocument
 from docling_core.types.doc.items.text import SectionHeaderItem
 from docling_core.types.doc.labels import DocItemLabel
 
-os.environ.get("HF_TOKEN", None)
+from sportevidence.models import Chunk
 
 
 class MarkdownTableProvider(ChunkingSerializerProvider):
@@ -66,14 +66,38 @@ def build_chunker(
     )
 
 
-def chunk_document(json_path: Path, max_tokens: int = 1024) -> tuple[list, str | None]:
+def chunk_document(
+    json_path: Path, max_tokens: int = 1024
+) -> tuple[list[Chunk], str | None, str]:
+    """Build contextualized chunks with 1-based prepared-PDF source pages."""
     document = DoclingDocument.load_from_json(json_path)
+    document_id = document.name.replace("_prepared", "")
     tokenizer = build_tokenizer(
         model_name="Qwen/Qwen3-Embedding-0.6B",
         max_tokens=max_tokens,
     )
     chunker = build_chunker(tokenizer)
-    chunks_text = [
-        chunker.contextualize(chunk=chunks) for chunks in chunker.chunk(document)
-    ]
-    return chunks_text, extract_title(document)
+
+    chunks: list[Chunk] = []
+
+    for index, raw_chunk in enumerate(chunker.chunk(document)):
+        # HybridChunker declares BaseChunk, but produces DocChunk metadata.
+        docling_chunk = DocChunk.model_validate(raw_chunk)
+        pages = tuple(
+            sorted(
+                {
+                    provenance.page_no
+                    for item in docling_chunk.meta.doc_items
+                    for provenance in item.prov
+                }
+            )
+        )
+        chunks.append(
+            Chunk(
+                chunk_id=f"{document_id}:{index}",
+                chunk_index=index,
+                text=chunker.contextualize(chunk=docling_chunk),
+                page_numbers=pages,
+            )
+        )
+    return chunks, extract_title(document), document_id

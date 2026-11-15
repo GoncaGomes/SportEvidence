@@ -3,9 +3,26 @@ from pathlib import Path
 from unittest.mock import Mock, call
 
 import pytest
+from docling_core.transforms.chunker.doc_chunk import DocChunk, DocMeta
 from docling_core.types.doc import DocItemLabel, DoclingDocument, TableCell, TableData  # pyright: ignore[reportPrivateImportUsage]
+from docling_core.types.doc.document import BoundingBox, ProvenanceItem
 
 from sportevidence.ingestion import chunking
+from sportevidence.models import Chunk
+
+
+def make_docling_chunk(text: str, pages: tuple[int, ...] = ()) -> DocChunk:
+    document = DoclingDocument(name="example")
+    item = document.add_text(label=DocItemLabel.TEXT, text=text)
+    item.prov = [
+        ProvenanceItem(
+            page_no=page,
+            bbox=BoundingBox(l=0, t=0, r=1, b=1),
+            charspan=(0, len(text)),
+        )
+        for page in pages
+    ]
+    return DocChunk(text=text, meta=DocMeta(doc_items=[item]))
 
 
 def test_extract_title_returns_stripped_title_and_prefers_title_over_header() -> None:
@@ -65,11 +82,12 @@ def test_extract_title_skips_blank_level_one_heading() -> None:
     assert chunking.extract_title(document) == "Results"
 
 
+@pytest.mark.parametrize("document_name", ["Example_prepared", "Example"])
 def test_successful_chunking_and_coordination(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, document_name: str
 ) -> None:
     json_path = tmp_path / "paper.json"
-    document = DoclingDocument(name="Example")
+    document = DoclingDocument(name=document_name)
     document.add_text(label=DocItemLabel.TITLE, text="Sport science evidence")
 
     fake_loader = Mock(return_value=document)
@@ -79,8 +97,8 @@ def test_successful_chunking_and_coordination(
     fake_build_tokenizer = Mock(return_value=fake_tokenizer)
     fake_build_chunker = Mock(return_value=fake_chunker)
 
-    first_chunk = Mock()
-    second_chunk = Mock()
+    first_chunk = make_docling_chunk("First", (3, 2, 3))
+    second_chunk = make_docling_chunk("Second")
     fake_chunker.chunk.return_value = (first_chunk, second_chunk)
     fake_chunker.contextualize.side_effect = [
         "First contextualized chunk",
@@ -109,8 +127,21 @@ def test_successful_chunking_and_coordination(
     ]
 
     assert result == (
-        ["First contextualized chunk", "Second contextualized chunk"],
+        [
+            Chunk(
+                chunk_id="Example:0",
+                chunk_index=0,
+                text="First contextualized chunk",
+                page_numbers=(2, 3),
+            ),
+            Chunk(
+                chunk_id="Example:1",
+                chunk_index=1,
+                text="Second contextualized chunk",
+            ),
+        ],
         "Sport science evidence",
+        "Example",
     )
 
 
@@ -136,7 +167,7 @@ def test_chunk_document_returns_no_chunks_when_chunker_produces_none(
 
     result = chunking.chunk_document(tmp_path / "paper.json")
 
-    assert result == ([], title)
+    assert result == ([], title, "example")
     fake_chunker.chunk.assert_called_once_with(document)
     fake_chunker.contextualize.assert_not_called()
     fake_build_tokenizer.assert_called_once_with(
@@ -190,9 +221,9 @@ def test_chunk_document_propagates_errors_while_iterating_chunks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     error = RuntimeError("Chunk iteration failed")
-    first_chunk = Mock()
+    first_chunk = make_docling_chunk("First")
 
-    def failing_chunks() -> Iterator[Mock]:
+    def failing_chunks() -> Iterator[DocChunk]:
         yield first_chunk
         raise error
 
@@ -217,8 +248,8 @@ def test_chunk_document_propagates_errors_while_iterating_chunks(
 def test_chunk_document_propagates_contextualization_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    first_chunk = Mock()
-    second_chunk = Mock()
+    first_chunk = make_docling_chunk("First")
+    second_chunk = make_docling_chunk("Second")
     error = RuntimeError("Contextualization failed")
     fake_chunker = Mock()
     fake_chunker.chunk.return_value = [first_chunk, second_chunk]
@@ -351,12 +382,18 @@ def test_chunk_document_with_real_json_chunker_and_local_tokenizer(
     json_path = tmp_path / "paper.json"
     document.save_as_json(json_path)
 
-    texts, title = chunking.chunk_document(json_path, max_tokens=128)
+    chunks, title, document_id = chunking.chunk_document(json_path, max_tokens=128)
 
     assert title == "Sports science evidence"
-    assert texts
-    assert all(isinstance(text, str) and text.strip() for text in texts)
-    combined_text = "\n".join(texts)
+    assert document_id == "example"
+    assert chunks
+    assert all(isinstance(chunk, Chunk) and chunk.text.strip() for chunk in chunks)
+    assert [chunk.chunk_id for chunk in chunks] == [
+        f"{document_id}:{index}" for index in range(len(chunks))
+    ]
+    assert [chunk.chunk_index for chunk in chunks] == list(range(len(chunks)))
+    assert all(chunk.embedding is None for chunk in chunks)
+    combined_text = "\n".join(chunk.text for chunk in chunks)
     assert "Results" in combined_text
     assert "Training improves strength." in combined_text
     assert "Table 1 Training outcomes" in combined_text
