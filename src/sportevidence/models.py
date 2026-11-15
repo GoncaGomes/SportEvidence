@@ -15,5 +15,8 @@ class Document:
 
 @dataclass(frozen=True, slots=True)
 class Chunk:
+    chunk_id: str
+    chunk_index: int
     text: str
+    page_numbers: tuple[int, ...] = ()
     embedding: list[float] | None = None
