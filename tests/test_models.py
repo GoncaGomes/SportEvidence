@@ -67,11 +67,15 @@ def test_document_accepts_empty_list() -> None:
     assert document.title is None
 
 
-def test_search_hit_preserves_fields() -> None:
+@pytest.mark.parametrize(
+    "title", ["Training outcomes", None], ids=["titled", "untitled"]
+)
+def test_search_hit_preserves_fields(title: str | None) -> None:
     source_path = Path("source.pdf")
     hit = SearchHit(
         chunk_id="abc123:0",
         document_id="abc123",
+        title=title,
         text="First text.",
         source_path=source_path,
         page_numbers=(2, 3),
@@ -80,6 +84,7 @@ def test_search_hit_preserves_fields() -> None:
 
     assert hit.chunk_id == "abc123:0"
     assert hit.document_id == "abc123"
+    assert hit.title == title
     assert hit.text == "First text."
     assert hit.source_path == source_path
     assert hit.page_numbers == (2, 3)

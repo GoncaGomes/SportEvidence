@@ -26,6 +26,7 @@ class Chunk:
 class SearchHit:
     chunk_id: str
     document_id: str
+    title: str | None
     text: str
     source_path: Path
     page_numbers: tuple[int, ...]
