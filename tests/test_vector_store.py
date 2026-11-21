@@ -49,9 +49,13 @@ def document() -> Document:
     )
 
 
+@pytest.mark.parametrize(
+    "title", ["Strength training", None], ids=["titled", "untitled"]
+)
 def test_upsert_document_preserves_data_and_makes_it_searchable(
-    collection: Collection, document: Document
+    collection: Collection, document: Document, title: str | None
 ) -> None:
+    document = replace(document, title=title)
     assert upsert_document(collection, document) == 1
     assert get_document(collection, document.document_id) == document
 
@@ -59,10 +63,22 @@ def test_upsert_document_preserves_data_and_makes_it_searchable(
     chunk = document.chunks[0]
     assert hit.chunk_id == chunk.chunk_id
     assert hit.document_id == document.document_id
+    assert hit.title == title
     assert hit.text == chunk.text
     assert hit.source_path == document.source_path
     assert hit.page_numbers == chunk.page_numbers
     assert hit.distance == pytest.approx(0.0)
+
+
+def test_search_chunks_rejects_non_string_title_metadata(
+    collection: Collection, document: Document
+) -> None:
+    upsert_document(collection, document)
+    chunk_id = document.chunks[0].chunk_id
+    collection.update(ids=[chunk_id], metadatas=[{"title": 42}])
+
+    with pytest.raises(ValueError, match=f"Chunk {chunk_id!r} has no title"):
+        search_chunks(collection, [1.0, 0.0])
 
 
 def test_upsert_document_updates_without_duplicating(

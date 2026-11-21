@@ -158,10 +158,15 @@ def search_chunks(
         if not isinstance(hit_document_id, str) or not isinstance(source_path, str):
             raise TypeError(f"Chunk {chunk_id!r} has invalid source metadata.")
 
+        hit_title = metadata.get("title")
+        if hit_title is not None and not isinstance(hit_title, str):
+            raise ValueError(f"Chunk {chunk_id!r} has no title.")
+
         hits.append(
             SearchHit(
                 chunk_id=chunk_id,
                 document_id=hit_document_id,
+                title=hit_title,
                 text=text,
                 source_path=Path(source_path),
                 page_numbers=_read_page_numbers(metadata.get("page_numbers"), chunk_id),
