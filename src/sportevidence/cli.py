@@ -11,6 +11,7 @@ from dotenv import load_dotenv
 
 from sportevidence.config import RetrievalSettings
 from sportevidence.ingestion.embeddings import (
+    calculate_sha256,
     embed_document,
     save_embeded_document_json,
 )
@@ -123,13 +124,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "ingest-to-db":
         artifact_dir = args.artifacts_dir
+        pdf_sha256 = calculate_sha256(args.input_pdf_path)
         prepared_pdf_path = fix_pdf_orientation(
             args.input_pdf_path,
-            artifact_dir / f"{args.input_pdf_path.stem}_prepared.pdf",
+            artifact_dir / f"{pdf_sha256}_prepared.pdf",
         )
         docling_json = convert_document(prepared_pdf_path, artifact_dir)
         table_associate_json_path = associate_table_captions(docling_json)
-        doc = embed_document(table_associate_json_path)
+        doc = embed_document(table_associate_json_path, pdf_sha256)
 
         settings = RetrievalSettings.from_env()
         db_path = args.db_path or settings.db_path

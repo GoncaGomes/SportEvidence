@@ -82,9 +82,21 @@ def test_extract_title_skips_blank_level_one_heading() -> None:
     assert chunking.extract_title(document) == "Results"
 
 
-@pytest.mark.parametrize("document_name", ["Example_prepared", "Example"])
+@pytest.mark.parametrize(
+    ("document_name", "document_id", "expected_id"),
+    [
+        ("Example_prepared", None, "Example"),
+        ("Example", None, "Example"),
+        ("Example_prepared", "pdf-digest", "pdf-digest"),
+    ],
+    ids=["prepared-name", "plain-name", "explicit-id"],
+)
 def test_successful_chunking_and_coordination(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, document_name: str
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    document_name: str,
+    document_id: str | None,
+    expected_id: str,
 ) -> None:
     json_path = tmp_path / "paper.json"
     document = DoclingDocument(name=document_name)
@@ -111,7 +123,7 @@ def test_successful_chunking_and_coordination(
 
     monkeypatch.setattr(chunking, "build_chunker", fake_build_chunker)
 
-    result = chunking.chunk_document(json_path, 256)
+    result = chunking.chunk_document(json_path, 256, document_id=document_id)
 
     fake_loader.assert_called_once_with(json_path)
     fake_build_tokenizer.assert_called_once_with(
@@ -129,19 +141,19 @@ def test_successful_chunking_and_coordination(
     assert result == (
         [
             Chunk(
-                chunk_id="Example:0",
+                chunk_id=f"{expected_id}:0",
                 chunk_index=0,
                 text="First contextualized chunk",
                 page_numbers=(2, 3),
             ),
             Chunk(
-                chunk_id="Example:1",
+                chunk_id=f"{expected_id}:1",
                 chunk_index=1,
                 text="Second contextualized chunk",
             ),
         ],
         "Sport science evidence",
-        "Example",
+        expected_id,
     )
 
 

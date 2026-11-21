@@ -129,28 +129,43 @@ def test_embed_texts_rejects_invalid_response(
         embeddings.embed_texts(["First", "Second"], client=client, settings=settings)
 
 
+@pytest.mark.parametrize(
+    ("document_id", "resolved_id"),
+    [(None, "paper"), ("pdf-digest", "pdf-digest")],
+    ids=["derived-id", "explicit-id"],
+)
 def test_embed_document_builds_document(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    document_id: str | None,
+    resolved_id: str,
 ) -> None:
     json_path = tmp_path / "paper.json"
     content = json.dumps({"name": "different_prepared"}).encode("utf-8")
     json_path.write_bytes(content)
     chunks = [
-        Chunk(chunk_id="paper:0", chunk_index=0, text="First", page_numbers=(1, 2)),
-        Chunk(chunk_id="paper:1", chunk_index=1, text="Second", page_numbers=(3,)),
+        Chunk(
+            chunk_id=f"{resolved_id}:0",
+            chunk_index=0,
+            text="First",
+            page_numbers=(1, 2),
+        ),
+        Chunk(
+            chunk_id=f"{resolved_id}:1", chunk_index=1, text="Second", page_numbers=(3,)
+        ),
     ]
-    chunk_document = Mock(return_value=(chunks, "Paper title", "paper"))
+    chunk_document = Mock(return_value=(chunks, "Paper title", resolved_id))
     embed_texts = Mock(return_value=[[0.1, 0.2], [0.3, 0.4]])
     load_json = Mock(side_effect=AssertionError("Metadata must come from chunking"))
     monkeypatch.setattr(embeddings, "chunk_document", chunk_document)
     monkeypatch.setattr(embeddings, "embed_texts", embed_texts)
     monkeypatch.setattr(embeddings.json, "load", load_json)
 
-    result = embeddings.embed_document(json_path)
+    result = embeddings.embed_document(json_path, document_id=document_id)
 
     assert result == Document(
         title="Paper title",
-        document_id="paper",
+        document_id=resolved_id,
         source_path=json_path,
         source_hash=hashlib.sha256(content).hexdigest(),
         chunks=[
@@ -158,7 +173,7 @@ def test_embed_document_builds_document(
             replace(chunks[1], embedding=[0.3, 0.4]),
         ],
     )
-    chunk_document.assert_called_once_with(json_path)
+    chunk_document.assert_called_once_with(json_path, document_id=document_id)
     embed_texts.assert_called_once_with(["First", "Second"])
     load_json.assert_not_called()
     assert all(chunk.embedding is None for chunk in chunks)
@@ -184,7 +199,7 @@ def test_embed_document_with_no_chunks_needs_no_settings_or_client(
         chunks=[],
         title=None,
     )
-    chunk_document.assert_called_once_with(json_path)
+    chunk_document.assert_called_once_with(json_path, document_id=None)
     load_settings.assert_not_called()
     create_client.assert_not_called()
 

@@ -63,8 +63,11 @@ def embed_texts(
     return [item.embedding for item in results]
 
 
-def embed_document(json_path: Path) -> Document:
-    chunks, title, document_id = chunk_document(json_path)
+def embed_document(
+    json_path: Path,
+    document_id: str | None = None,
+) -> Document:
+    chunks, title, resolved_id = chunk_document(json_path, document_id=document_id)
     source_file_hash = calculate_sha256(json_path)
     embeded_chunks = embed_texts([chunk.text for chunk in chunks])
     chunks = [
@@ -73,7 +76,7 @@ def embed_document(json_path: Path) -> Document:
     ]
     doc = Document(
         title=title,
-        document_id=document_id,
+        document_id=resolved_id,
         source_path=json_path,
         source_hash=source_file_hash,
         chunks=chunks,

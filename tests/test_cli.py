@@ -20,6 +20,7 @@ def dotenv_loader(monkeypatch: pytest.MonkeyPatch) -> Mock:
 def services(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Avoid real PDF processing, network requests, and database or file writes."""
     mocks = SimpleNamespace(
+        calculate_sha256=Mock(),
         fix_pdf_orientation=Mock(),
         convert_document=Mock(),
         associate_table_captions=Mock(),
@@ -199,10 +200,12 @@ def test_ingest_to_db_indexes_embedded_document(
     settings = SimpleNamespace(db_path=Path("configured-db"))
     monkeypatch.setattr(cli.RetrievalSettings, "from_env", Mock(return_value=settings))
 
+    pdf_sha256 = "a" * 64
     prepared_pdf = Path("prepared.pdf")
     converted_json = Path("converted.json")
     captioned_json = Path("captioned.json")
     document = SimpleNamespace(document_id="source-id")
+    services.calculate_sha256.return_value = pdf_sha256
     services.fix_pdf_orientation.return_value = prepared_pdf
     services.convert_document.return_value = converted_json
     services.associate_table_captions.return_value = captioned_json
@@ -225,12 +228,13 @@ def test_ingest_to_db_indexes_embedded_document(
 
     assert calls.method_calls == [
         call.load_dotenv(),
+        call.calculate_sha256(Path("source.pdf")),
         call.fix_pdf_orientation(
-            Path("source.pdf"), artifacts_dir / "source_prepared.pdf"
+            Path("source.pdf"), artifacts_dir / f"{pdf_sha256}_prepared.pdf"
         ),
         call.convert_document(prepared_pdf, artifacts_dir),
         call.associate_table_captions(converted_json),
-        call.embed_document(captioned_json),
+        call.embed_document(captioned_json, pdf_sha256),
         call.persistent_client(path=str(db_path)),
         call.get_or_create_collection(
             name="evidence",

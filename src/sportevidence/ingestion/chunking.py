@@ -67,11 +67,15 @@ def build_chunker(
 
 
 def chunk_document(
-    json_path: Path, max_tokens: int = 1024
+    json_path: Path,
+    max_tokens: int = 1024,
+    *,
+    document_id: str | None = None,
 ) -> tuple[list[Chunk], str | None, str]:
     """Build contextualized chunks with 1-based prepared-PDF source pages."""
     document = DoclingDocument.load_from_json(json_path)
-    document_id = document.name.replace("_prepared", "")
+    if document_id is None:
+        document_id = document.name.replace("_prepared", "")
     tokenizer = build_tokenizer(
         model_name="Qwen/Qwen3-Embedding-0.6B",
         max_tokens=max_tokens,
