@@ -1,11 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import replace
+import hashlib
+import json
+from dataclasses import asdict, replace
 from math import isfinite
+from pathlib import Path
 
 from openai import OpenAI
 
 from sportevidence.config import EmbeddingSettings
+from sportevidence.ingestion.chunking import (
+    chunk_document,
+)
 from sportevidence.models import Document
 
 
@@ -57,18 +63,42 @@ def embed_texts(
     return [item.embedding for item in results]
 
 
-def embed_chunks(
-    doc: Document,
-    *,
-    client: OpenAI | None = None,
-    settings: EmbeddingSettings | None = None,
+def embed_document(
+    json_path: Path,
+    document_id: str | None = None,
 ) -> Document:
-    texts = [chunk.text for chunk in doc.chunks]
-    vectors = embed_texts(texts, client=client, settings=settings)
-    return replace(
-        doc,
-        chunks=tuple(
-            replace(chunk, embedding=vector)
-            for chunk, vector in zip(doc.chunks, vectors, strict=True)
-        ),
+    chunks, title, resolved_id = chunk_document(json_path, document_id=document_id)
+    source_file_hash = calculate_sha256(json_path)
+    embeded_chunks = embed_texts([chunk.text for chunk in chunks])
+    chunks = [
+        replace(chunk, embedding=vector)
+        for chunk, vector in zip(chunks, embeded_chunks, strict=True)
+    ]
+    doc = Document(
+        title=title,
+        document_id=resolved_id,
+        source_path=json_path,
+        source_hash=source_file_hash,
+        chunks=chunks,
     )
+    return doc
+
+
+def save_embeded_document_json(
+    doc: Document,
+    output_directory: Path = Path("tests/fixtures/embeded_documents"),
+) -> None:
+    data = asdict(doc)
+    data["source_path"] = str(data["source_path"])
+    output_directory.mkdir(parents=True, exist_ok=True)
+    output_path = output_directory / f"{doc.document_id}.json"
+    with output_path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+
+def calculate_sha256(pdf_path: Path) -> str:
+    digest = hashlib.sha256()
+    with Path(pdf_path).open("rb") as file:
+        for chunk in iter(lambda: file.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()

@@ -3,13 +3,22 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 from pathlib import Path
+from typing import cast
 
+import chromadb
+from chromadb.api.client import Client
 from dotenv import load_dotenv
 
 from sportevidence.config import RetrievalSettings
-from sportevidence.ingestion.chunking import chunk_document
-from sportevidence.ingestion.embeddings import embed_chunks
-from sportevidence.storage.vector_store import query_collection, upsert_document
+from sportevidence.ingestion.embeddings import (
+    calculate_sha256,
+    embed_document,
+    save_embeded_document_json,
+)
+from sportevidence.ingestion.orientation import fix_pdf_orientation
+from sportevidence.ingestion.parsing import convert_document
+from sportevidence.ingestion.table_captions import associate_table_captions
+from sportevidence.storage.vector_store import upsert_document
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -18,35 +27,76 @@ def build_parser() -> argparse.ArgumentParser:
         description="Ingest and search sports-science evidence.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    defaults = RetrievalSettings.from_env()
+    RetrievalSettings.from_env()
 
-    document_to_db = subparsers.add_parser(
-        "document-to-db", help="Add a PDF document to the database"
+    fix_pdf_orientation = subparsers.add_parser(
+        "fix-pdf-orientation", help="Fix the orientation of a PDF document"
     )
-    document_to_db.add_argument(
+    fix_pdf_orientation.add_argument(
         "input_pdf_path", type=Path, help="Path to the input PDF file"
     )
-    document_to_db.add_argument(
-        "--input-db-path",
-        type=Path,
-        default=defaults.db_path,
-        help="Path to the persistent database (default: %(default)s)",
-    )
-    document_to_db.add_argument(
-        "--collection-name",
-        default=defaults.collection_name,
-        help="Collection to store the document in (default: %(default)s)",
+    fix_pdf_orientation.add_argument(
+        "output_pdf_path", type=Path, help="Output path for the fixed PDF file"
     )
 
-    query_db = subparsers.add_parser("query-db", help="Query the database")
-    query_db.add_argument("database_path", type=Path, help="Path to the database")
-    query_db.add_argument("collection_name", help="Collection to search")
-    query_db.add_argument(
-        "--query", action="append", required=True, help="Query text; repeat for a batch"
+    convert_pdf_docling = subparsers.add_parser(
+        "convert-pdf-docling", help="Convert a PDF to Doclingo format"
     )
-    query_db.add_argument(
-        "--n-results", type=int, default=5, help="Number of results per query"
+
+    convert_pdf_docling.add_argument(
+        "input_pdf_path", type=Path, help="Input path to the fixed PDF file"
     )
+
+    convert_pdf_docling.add_argument(
+        "--output-json-path",
+        type=Path,
+        default=Path("tests/fixtures/corpus_json"),
+        help="Output path for the Doclingo file",
+    )
+
+    associate_captions = subparsers.add_parser(
+        "associate-captions", help="Associate captions with chunks"
+    )
+
+    associate_captions.add_argument(
+        "input_json_path", type=Path, help="Path to docling json file"
+    )
+
+    embed_and_save_document = subparsers.add_parser(
+        "embed-and-save-document", help="Embed and save a document in json format"
+    )
+
+    embed_and_save_document.add_argument(
+        "json_path",
+        type=Path,
+        help="Input path to the caption associated json file",
+    )
+
+    embed_and_save_document.add_argument(
+        "--output-json-path",
+        type=Path,
+        default=Path("tests/fixtures/embeded_documents"),
+        help="Output path for the Doclingo file",
+    )
+
+    ingest_to_db = subparsers.add_parser(
+        "ingest-to-db", help="Inegst a pdf file and insert it in a collection"
+    )
+    ingest_to_db.add_argument(
+        "input_pdf_path", type=Path, help="Path to the input PDF file"
+    )
+    ingest_to_db.add_argument(
+        "collection_name", type=str, help="Name of the collection"
+    )
+    ingest_to_db.add_argument(
+        "--db-path",
+        type=Path,
+        help="Path to the database",
+    )
+    ingest_to_db.add_argument(
+        "--artifacts-dir", type=Path, default=Path("tests/fixtures/data/ingestion")
+    )
+
     return parser
 
 
@@ -55,39 +105,51 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     load_dotenv()
 
-    if args.command == "document-to-db":
-        document = chunk_document(args.input_pdf_path)
-        upsert_document(
-            embed_chunks(document),
-            args.input_db_path,
-            collection_name=args.collection_name,
-        )
+    if args.command == "fix-pdf-orientation":
+        fix_pdf_orientation(args.input_pdf_path, args.output_pdf_path)
         return 0
 
-    if args.command == "query-db":
-        if args.n_results <= 0:
-            parser.error("--n-results must be positive")
-        if any(not query.strip() for query in args.query):
-            parser.error("--query must not be empty or whitespace-only")
-
-        result = query_collection(
-            query=args.query,
-            db_path=args.database_path,
-            collection_name=args.collection_name,
-            n_results=args.n_results,
-        )
-        for query, chunks in zip(result.queries, result.retrieved_chunks, strict=True):
-            print(f"Query: {query}")
-            if not chunks:
-                print("  No results.")
-            for chunk in chunks:
-                print(f"  Chunk_id: {chunk.chunk_id}")
-                print(f"  Document_id: {chunk.document_id}")
-                print(f"  Source: {chunk.source_path}")
-                print(f"  Distance: {chunk.distance:.6f}")
-                print(f"  Text: {chunk.text}\n")
-                print(f"  Embeddings: {chunk.embedding[:3]}")
+    if args.command == "convert-pdf-docling":
+        convert_document(args.input_pdf_path, args.output_json_path)
         return 0
+
+    if args.command == "associate-captions":
+        associate_table_captions(args.input_json_path)
+        return 0
+
+    if args.command == "embed-and-save-document":
+        doc = embed_document(args.json_path)
+        save_embeded_document_json(doc, args.output_json_path)
+        return 0
+
+    if args.command == "ingest-to-db":
+        artifact_dir = args.artifacts_dir
+        pdf_sha256 = calculate_sha256(args.input_pdf_path)
+        prepared_pdf_path = fix_pdf_orientation(
+            args.input_pdf_path,
+            artifact_dir / f"{pdf_sha256}_prepared.pdf",
+        )
+        docling_json = convert_document(prepared_pdf_path, artifact_dir)
+        table_associate_json_path = associate_table_captions(docling_json)
+        doc = embed_document(table_associate_json_path, pdf_sha256)
+
+        settings = RetrievalSettings.from_env()
+        db_path = args.db_path or settings.db_path
+        persistent_client = cast(Client, chromadb.PersistentClient(path=str(db_path)))
+        with persistent_client as client:
+            collection = client.get_or_create_collection(
+                name=args.collection_name,
+                embedding_function=None,
+                configuration={"hnsw": {"space": "cosine"}},
+            )
+            written = upsert_document(collection, doc)
+
+        print(
+            f"Indexed {written} chunks from {doc.document_id} "
+            f"in {args.collection_name}."
+        )
+        return 0
+    parser.error(f"Unhandled command: {args.command}")
 
 
 if __name__ == "__main__":

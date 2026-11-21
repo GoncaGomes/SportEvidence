@@ -1,55 +1,107 @@
-import hashlib
 from pathlib import Path
 
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from docling_core.transforms.chunker.doc_chunk import DocChunk
+from docling_core.transforms.chunker.hierarchical_chunker import (
+    ChunkingDocSerializer,
+    ChunkingSerializerProvider,
+)
+from docling_core.transforms.chunker.hybrid_chunker import HybridChunker
+from docling_core.transforms.chunker.tokenizer.huggingface import (
+    HuggingFaceTokenizer,
+)
+from docling_core.transforms.serializer.markdown import (
+    MarkdownParams,
+    MarkdownTableSerializer,
+)
+from docling_core.types.doc.document import DoclingDocument
+from docling_core.types.doc.items.text import SectionHeaderItem
+from docling_core.types.doc.labels import DocItemLabel
 
-from sportevidence.ingestion.parsing import parse_markdown
-from sportevidence.models import Chunk, Document
+from sportevidence.models import Chunk
 
 
-def chunk_text(
-    text: str,
-    document_id: str,
-    chunk_size: int = 2500,
-    overlap: int = 250,
-) -> list[Chunk]:
-    if chunk_size <= 0:
-        raise ValueError("chunk_size must be positive")
-    if overlap > chunk_size or overlap < 0:
-        raise ValueError("overlap must satisfy 0 <= overlap <= chunk_size")
-
-    splitter = RecursiveCharacterTextSplitter(
-        separators=["\n\n", "\n", " ", ""],
-        keep_separator=True,
-        chunk_size=chunk_size,
-        chunk_overlap=overlap,
-        is_separator_regex=False,
-        length_function=len,
-    )
-    chunks = splitter.split_text(text)
-    return [
-        Chunk(
-            chunk_id=f"{document_id}#{index:04d}",
-            text=chunk_text,
+class MarkdownTableProvider(ChunkingSerializerProvider):
+    def get_serializer(self, doc: DoclingDocument) -> ChunkingDocSerializer:
+        return ChunkingDocSerializer(
+            doc=doc,
+            table_serializer=MarkdownTableSerializer(),
+            params=MarkdownParams(compact_tables=True),
         )
-        for index, chunk_text in enumerate(chunks, start=1)
-    ]
 
 
-def chunk_document(pdf_path: Path) -> Document:
-    document_id = calculate_sha256(pdf_path)
-    chunk_list = chunk_text(
-        text=parse_markdown(pdf_path),
-        document_id=document_id,
-    )
-    return Document(
-        document_id=document_id, source_path=pdf_path, chunks=tuple(chunk_list)
+def build_tokenizer(
+    model_name: str = "Qwen/Qwen3-Embedding-0.6B",
+    max_tokens: int = 1024,
+) -> HuggingFaceTokenizer:
+    return HuggingFaceTokenizer.from_pretrained(
+        model_name=model_name,
+        max_tokens=max_tokens,
     )
 
 
-def calculate_sha256(pdf_path: Path) -> str:
-    digest = hashlib.sha256()
-    with Path(pdf_path).open("rb") as file:
-        for chunk in iter(lambda: file.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def extract_title(document: DoclingDocument) -> str | None:
+    for item in document.texts:
+        if item.label == DocItemLabel.TITLE and item.text.strip():
+            return item.text.strip()
+
+    for item in document.texts:
+        if (
+            isinstance(item, SectionHeaderItem)
+            and item.level == 1
+            and item.text.strip()
+        ):
+            return item.text.strip()
+
+    return None
+
+
+def build_chunker(
+    tokenizer: HuggingFaceTokenizer,
+) -> HybridChunker:
+    return HybridChunker(
+        tokenizer=tokenizer,
+        serializer_provider=MarkdownTableProvider(),
+        repeat_table_header=True,
+        merge_peers=True,
+    )
+
+
+def chunk_document(
+    json_path: Path,
+    max_tokens: int = 1024,
+    *,
+    document_id: str | None = None,
+) -> tuple[list[Chunk], str | None, str]:
+    """Build contextualized chunks with 1-based prepared-PDF source pages."""
+    document = DoclingDocument.load_from_json(json_path)
+    if document_id is None:
+        document_id = document.name.replace("_prepared", "")
+    tokenizer = build_tokenizer(
+        model_name="Qwen/Qwen3-Embedding-0.6B",
+        max_tokens=max_tokens,
+    )
+    chunker = build_chunker(tokenizer)
+
+    chunks: list[Chunk] = []
+
+    for index, raw_chunk in enumerate(chunker.chunk(document)):
+        # HybridChunker declares BaseChunk, but produces DocChunk metadata.
+        docling_chunk = DocChunk.model_validate(raw_chunk)
+        pages = tuple(
+            sorted(
+                {
+                    provenance.page_no
+                    for item in docling_chunk.meta.doc_items
+                    for provenance in item.prov
+                }
+            )
+        )
+        chunks.append(
+            Chunk(
+                chunk_id=f"{document_id}:{index}",
+                chunk_index=index,
+                text=chunker.contextualize(chunk=docling_chunk),
+                page_numbers=pages,
+            )
+        )
+    return chunks, extract_title(document), document_id

@@ -2,8 +2,7 @@
 
 ## Project Overview
 
-SportEvidence is an early-stage Python research assistant for sports-science evidence with the objective of implementig a RAG system to search within a 50 document corpus of science based documentation. Current project exposes CLI commands to:
--  implement single document corpus -> chromaDB storage and  
+SportEvidence is an early-stage Python research assistant for any corpus the objective of implementig a RAG system to search within variable size document corpus.
 
 ## Environment
 - **Python** >= 3.12

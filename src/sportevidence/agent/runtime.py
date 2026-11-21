@@ -4,10 +4,10 @@ from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph.state import CompiledStateGraph
+from sportevidence.agent.tools import create_query_tool
 
 from sportevidence.agent.model import create_chat_model
 from sportevidence.agent.prompts import SYSTEM_PROMPT
-from sportevidence.agent.tools import create_query_tool
 
 
 def create_evidence_agent(
