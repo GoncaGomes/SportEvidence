@@ -1,73 +1,154 @@
+from collections.abc import Iterator
+from dataclasses import replace
 from pathlib import Path
-from unittest.mock import MagicMock, Mock
+from uuid import uuid4
 
+import chromadb
 import pytest
+from chromadb import Collection
 
-from sportevidence.storage import vector_store
+from sportevidence.models import Chunk, Document
+from sportevidence.storage.vector_store import (
+    get_document,
+    search_chunks,
+    upsert_document,
+)
 
 
-def test_query_collection_preserves_all_queries_and_chunk_metadata(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    embed = Mock(return_value=[[1.0, 0.0], [0.0, 1.0]])
-    monkeypatch.setattr(vector_store, "embed_texts", embed)
-    collection = Mock()
-    collection.query.return_value = {
-        "ids": [["a#0001", "b#0001"], ["c#0001"]],
-        "documents": [["First", "Second"], ["Third"]],
-        "embeddings": [[[1.0, 0.0], [0.8, 0.2]], [[0.0, 1.0]]],
-        "metadatas": [
-            [
-                {"document_id": "a", "source_path": "a.pdf"},
-                {"document_id": "b", "source_path": "b.pdf"},
-            ],
-            [{"document_id": "c", "source_path": "c.pdf"}],
+@pytest.fixture
+def collection() -> Iterator[Collection]:
+    with chromadb.Client() as client:
+        name = f"sports-{uuid4().hex}"
+        collection = client.create_collection(
+            name=name,
+            embedding_function=None,
+            configuration={"hnsw": {"space": "cosine"}},
+        )
+        try:
+            yield collection
+        finally:
+            client.delete_collection(name)
+
+
+@pytest.fixture
+def document() -> Document:
+    return Document(
+        document_id="training",
+        title="Strength training",
+        source_path=Path("papers/training.pdf"),
+        source_hash="training-hash",
+        chunks=[
+            Chunk(
+                chunk_id="training#0000",
+                chunk_index=0,
+                text="Strength improves with progressive loading.",
+                page_numbers=(2, 3),
+                embedding=[1.0, 0.0],
+            ),
         ],
-        "distances": [[0.0, 0.2], [0.1]],
-    }
-    # `with chromadb.PersistentClient(...)` binds to `__enter__`; point it at
-    # the configured client mock.
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.get_collection.return_value = collection
-    monkeypatch.setattr(
-        vector_store.chromadb, "PersistentClient", Mock(return_value=client)
     )
 
-    result = vector_store.query_collection(["One", "Two"], tmp_path, "evidence")
 
-    assert result.queries == ["One", "Two"]
-    assert [
-        [chunk.document_id for chunk in group] for group in result.retrieved_chunks
-    ] == [["a", "b"], ["c"]]
-    second = result.retrieved_chunks[0][1]
-    assert (second.text, second.source_path, second.embedding, second.distance) == (
-        "Second",
-        "b.pdf",
-        [0.8, 0.2],
-        0.2,
-    )
-    assert result.retrieved_chunks[1][0].text == "Third"
-
-
-def test_query_collection_keeps_empty_groups(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+def test_upsert_document_preserves_data_and_makes_it_searchable(
+    collection: Collection, document: Document
 ) -> None:
-    monkeypatch.setattr(vector_store, "embed_texts", Mock(return_value=[[1.0]]))
-    client = MagicMock()
-    client.__enter__.return_value = client
-    client.get_collection.return_value.query.return_value = {
-        "ids": [[]],
-        "documents": [[]],
-        "embeddings": [[]],
-        "metadatas": [[]],
-        "distances": [[]],
-    }
-    monkeypatch.setattr(
-        vector_store.chromadb, "PersistentClient", Mock(return_value=client)
+    assert upsert_document(collection, document) == 1
+    assert get_document(collection, document.document_id) == document
+
+    (hit,) = search_chunks(collection, [1.0, 0.0])
+    chunk = document.chunks[0]
+    assert hit.chunk_id == chunk.chunk_id
+    assert hit.document_id == document.document_id
+    assert hit.text == chunk.text
+    assert hit.source_path == document.source_path
+    assert hit.page_numbers == chunk.page_numbers
+    assert hit.distance == pytest.approx(0.0)
+
+
+def test_upsert_document_updates_without_duplicating(
+    collection: Collection, document: Document
+) -> None:
+    upsert_document(collection, document)
+    updated = replace(
+        document,
+        title="Updated strength training",
+        source_hash="updated-hash",
+        chunks=[
+            replace(
+                document.chunks[0],
+                text="Updated training guidance.",
+                page_numbers=(4,),
+                embedding=[0.0, 1.0],
+            ),
+        ],
     )
 
-    result = vector_store.query_collection(["No match"], tmp_path, "evidence")
+    assert upsert_document(collection, updated) == 1
+    assert collection.count() == 1
+    assert get_document(collection, document.document_id) == updated
 
-    assert result.queries == ["No match"]
-    assert result.retrieved_chunks == [[]]
+
+def test_upsert_document_rejects_missing_embedding_without_saving_any_chunks(
+    collection: Collection, document: Document
+) -> None:
+    incomplete = replace(
+        document,
+        chunks=[
+            *document.chunks,
+            Chunk(chunk_id="training#0001", chunk_index=1, text="Missing embedding."),
+        ],
+    )
+
+    with pytest.raises(ValueError, match=r"Chunk 'training#0001' has no embedding"):
+        upsert_document(collection, incomplete)
+
+    assert collection.count() == 0
+
+
+def test_search_chunks_orders_by_distance_and_respects_limit(
+    collection: Collection, document: Document
+) -> None:
+    ranked = replace(
+        document,
+        chunks=[
+            Chunk("training#0000", 0, "Farthest", embedding=[-1.0, 0.0]),
+            Chunk("training#0001", 1, "Middle", embedding=[0.0, 1.0]),
+            Chunk("training#0002", 2, "Closest", embedding=[1.0, 0.0]),
+        ],
+    )
+    upsert_document(collection, ranked)
+
+    hits = search_chunks(collection, [1.0, 0.0], limit=2)
+
+    assert [hit.chunk_id for hit in hits] == ["training#0002", "training#0001"]
+    assert [hit.distance for hit in hits] == pytest.approx([0.0, 1.0])
+
+
+def test_search_chunks_filters_by_document_id(
+    collection: Collection, document: Document
+) -> None:
+    other = Document(
+        document_id="recovery",
+        source_path=Path("papers/recovery.pdf"),
+        source_hash="recovery-hash",
+        chunks=[
+            Chunk("recovery#0000", 0, "Recovery after exercise.", embedding=[0.0, 1.0]),
+        ],
+    )
+    upsert_document(collection, document)
+    upsert_document(collection, other)
+
+    hits = search_chunks(collection, [1.0, 0.0], document_id=other.document_id)
+
+    assert [(hit.document_id, hit.chunk_id) for hit in hits] == [
+        (other.document_id, other.chunks[0].chunk_id)
+    ]
+
+
+def test_missing_document_and_unmatched_search_filter(
+    collection: Collection, document: Document
+) -> None:
+    upsert_document(collection, document)
+
+    assert get_document(collection, "missing") is None
+    assert search_chunks(collection, [1.0, 0.0], document_id="missing") == []
