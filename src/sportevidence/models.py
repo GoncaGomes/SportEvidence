@@ -20,3 +20,13 @@ class Chunk:
     text: str
     page_numbers: tuple[int, ...] = ()
     embedding: list[float] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    chunk_id: str
+    document_id: str
+    text: str
+    source_path: Path
+    page_numbers: tuple[int, ...]
+    distance: float

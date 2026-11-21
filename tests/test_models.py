@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from sportevidence.models import Chunk, Document
+from sportevidence.models import Chunk, Document, SearchHit
 
 
 @pytest.fixture
@@ -65,6 +65,25 @@ def test_document_accepts_empty_list() -> None:
     )
     assert document.chunks == []
     assert document.title is None
+
+
+def test_search_hit_preserves_fields() -> None:
+    source_path = Path("source.pdf")
+    hit = SearchHit(
+        chunk_id="abc123:0",
+        document_id="abc123",
+        text="First text.",
+        source_path=source_path,
+        page_numbers=(2, 3),
+        distance=0.25,
+    )
+
+    assert hit.chunk_id == "abc123:0"
+    assert hit.document_id == "abc123"
+    assert hit.text == "First text."
+    assert hit.source_path == source_path
+    assert hit.page_numbers == (2, 3)
+    assert hit.distance == 0.25
 
 
 def test_models_compare_by_value(chunk: Chunk) -> None:
