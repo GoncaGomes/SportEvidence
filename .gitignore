@@ -13,3 +13,4 @@ wheels/
 # Fixtures
 tests/fixtures
 tests/corpus_desporto_50.json
+tests/reports
